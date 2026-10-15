@@ -278,9 +278,19 @@ $('#myz').addEventListener('click',e=>{if(!G)return;
 /* ---------- online (shared db doc per table) ---------- */
 const API = (window.BLUFF_API_URL || '/api/room');
 const snapOf=j=>({exists:j.exists,data:()=>j.data});
-const rpc=b=>fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()});
+const rpc=async b=>{
+ const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+ const j=await r.json().catch(()=>null);
+ if(!r.ok)throw new Error((j&&(j.details||j.error))||('Server error '+r.status));
+ return j;
+};
 function mkRef(code){return{
- async get(){const r=await fetch(API+'?code='+code,{cache:'no-store'});if(!r.ok)throw new Error(r.status);return snapOf(await r.json())},
+ async get(){
+  const r=await fetch(API+'?code='+code,{cache:'no-store'});
+  const j=await r.json().catch(()=>null);
+  if(!r.ok)throw new Error((j&&(j.details||j.error))||('Server error '+r.status));
+  return snapOf(j);
+ },
  set:d=>rpc({code,op:'set',data:d}),update:d=>rpc({code,op:'update',data:d}),
  onSnapshot(next,err){let last,stop=false,bad=false;const tick=async()=>{if(stop)return;
   try{const r=await fetch(API+'?code='+code,{cache:'no-store'});if(!r.ok)throw 0;const t=await r.text();bad=false;if(t!==last){last=t;next(snapOf(JSON.parse(t)))}}
@@ -294,24 +304,24 @@ async function hostTable(){const nm=oname();if(!nm)return;const c=await cap();if
  try{
   await ref.set({phase:'lobby',host:c.uid,seats:[{uid:c.uid,name:nm}],cfg:{decks:S.decks,jokers:S.jokers,removed:[...S.removed]}});
   attach(ref,c.uid,code,nm,true);
- }catch(e){toast('Could not create table. Check Vercel/Redis connection.');}}
+ }catch(e){toast(e.message||'Could not create table. Check Vercel/Redis.');}}
 async function joinTable(){const nm=oname();if(!nm)return;const code=$('#jc').value.trim().toUpperCase();if(code.length!==4)return toast('Enter the 4-letter code.');
  const c=await cap();if(!c)return;const ref=c.db.doc('rooms/'+code);
  try{
   const s=await ref.get();if(!s.exists)return toast('No table with that code.');
   attach(ref,c.uid,code,nm,false);
- }catch(e){toast('Could not connect to table. Check connection.');}}
+ }catch(e){toast(e.message||'Could not connect to table.');}}
 function attach(ref,uid,code,nm,host){ON={ref,uid,code,nm,host,me:-1,lobby:null};S.mode='online';
  ON.unsub=ref.onSnapshot(onDoc,()=>toast('Lost connection to the table.'))}
 function onDoc(snap){if(!ON)return;if(!snap.exists){toast('Table closed.');return}const d=snap.data();
  if(d.phase==='lobby'){ON.lobby=d;ON.me=d.seats.findIndex(s=>s.uid===ON.uid);
-  if(ON.me<0&&!inGame){if(d.seats.length>=8)return toast('Table is full.');ON.ref.update({seats:[...d.seats,{uid:ON.uid,name:ON.nm}]}).catch(()=>toast('Could not join table.'));return}
+  if(ON.me<0&&!inGame){if(d.seats.length>=8)return toast('Table is full.');ON.ref.update({seats:[...d.seats,{uid:ON.uid,name:ON.nm}]}).catch(e=>toast(e.message||'Could not join table.'));return}
   $('#lobby').classList.remove('hidden');$('#lc').textContent=ON.code;
   $('#ls').innerHTML=d.seats.map((s,i)=>`<div class="log">${i+1}. <b style="color:var(--cream)">${esc(s.name)}</b>${s.uid===d.host?' · host':''}${s.uid===ON.uid?' · you':''}</div>`).join('');
   S.decks=d.cfg.decks;S.jokers=d.cfg.jokers;S.removed=new Set(d.cfg.removed);
   $('#lstart').classList.toggle('hidden',!ON.host||d.seats.length<2);
   $('#lh').textContent=ON.host?(d.seats.length<2?'Waiting for friends to join…':`${d.seats.length} players · ${S.decks} deck${S.decks>1?'s':''}`):'Waiting for the host to deal…';return}
- const gg=JSON.parse(d.g),mi=gg.uids.indexOf(ON.uid);if(mi<0){toast('That game has already started.');leave();return}G=gg;ON.me=mi;S.decks=G.cfg.decks;S.removed=new Set(G.cfg.removed);S.players=G.names.map(n=>({name:n}));
+ const gg=(typeof d.g==='string'?JSON.parse(d.g):d.g),mi=gg.uids.indexOf(ON.uid);if(mi<0){toast('That game has already started.');leave();return}G=gg;ON.me=mi;S.decks=G.cfg.decks;S.removed=new Set(G.cfg.removed);S.players=G.names.map(n=>({name:n}));
  if(!inGame){inGame=true;SEEN=G.reveal?G.reveal.n:0;WON=G.phase==='over';SEL.clear();$('#lobby').classList.add('hidden');$('#scr-setup').classList.add('hidden');$('#scr-game').classList.remove('hidden')}
  else if(G.phase!=='over')WON=false;
  render()}
@@ -319,6 +329,6 @@ async function startOnline(){const seats=ON.lobby.seats;S.mode='online';S.player
  $('#win').classList.add('hidden');const r=await ceremony(buildDeck(),seats.length);newGame(r,seats.map(s=>s.uid));
  try{
   await ON.ref.set({phase:'play',host:ON.uid,seats,cfg:ON.lobby.cfg,g:JSON.stringify(G)});
- }catch(e){toast('Could not start online game. Check connection.');}}
+ }catch(e){toast(e.message||'Could not start online game.');}}
 initSetup();
 </script></body></html>
